@@ -198,6 +198,7 @@ export async function registerRoutes(
       }
 
       const data = dataset.data as any[];
+      const sampledSize = Math.floor(data.length * (sampleSize / 100));
       
       // Calculate equivalence classes
       const equivalenceClasses = new Map<string, any[]>();
@@ -212,23 +213,59 @@ export async function registerRoutes(
       // Count violations and unique records
       let violations = 0;
       let uniqueRecords = 0;
+      let smallGroupCount = 0;
       const classSizes: number[] = [];
 
       equivalenceClasses.forEach((records) => {
         classSizes.push(records.length);
         if (records.length < kThreshold) {
           violations += records.length;
+          smallGroupCount++;
         }
         if (records.length === 1) {
           uniqueRecords++;
         }
       });
 
-      // Calculate overall risk
-      const overallRisk = uniqueRecords / data.length;
+      // Calculate ATTACK-SPECIFIC risk metrics
+      let overallRisk = 0;
       let riskLevel = "Low";
-      if (overallRisk > 0.3) riskLevel = "High";
-      else if (overallRisk > 0.1) riskLevel = "Medium";
+      
+      if (attackScenarios && attackScenarios.length > 0) {
+        const attackType = attackScenarios[0];
+        
+        if (attackType === "prosecutor") {
+          // Prosecutor Attack: Attacker KNOWS target is in dataset
+          // Risk = Probability of re-identifying if record is unique or small group
+          const vulnerableRecords = uniqueRecords + smallGroupCount;
+          overallRisk = (vulnerableRecords / data.length) * 0.85; // High confidence attack
+          if (overallRisk > 0.4) riskLevel = "High";
+          else if (overallRisk > 0.2) riskLevel = "Medium";
+          
+        } else if (attackType === "journalist") {
+          // Journalist Attack: Attacker RANDOMLY selects records
+          // Risk is lower - depends on chance of finding unique records
+          const probabilityOfSelectingVulnerable = (uniqueRecords + smallGroupCount) / data.length;
+          const samplingProbability = sampledSize / data.length;
+          overallRisk = probabilityOfSelectingVulnerable * samplingProbability * 0.6; // Lower confidence
+          if (overallRisk > 0.25) riskLevel = "High";
+          else if (overallRisk > 0.12) riskLevel = "Medium";
+          
+        } else if (attackType === "marketer") {
+          // Marketer Attack: Attacker TARGETS multiple records strategically
+          // Risk is highest for large attacks but focused on patterns
+          const vulnerabilityRate = (uniqueRecords + smallGroupCount) / data.length;
+          const targetingEfficiency = Math.min(1, sampledSize / 10); // Targeting efficiency factor
+          overallRisk = vulnerabilityRate * targetingEfficiency * 0.75; // Medium-high confidence
+          if (overallRisk > 0.35) riskLevel = "High";
+          else if (overallRisk > 0.15) riskLevel = "Medium";
+        }
+      } else {
+        // Default calculation if no attack specified
+        overallRisk = uniqueRecords / data.length;
+        if (overallRisk > 0.3) riskLevel = "High";
+        else if (overallRisk > 0.1) riskLevel = "Medium";
+      }
 
       // Generate histogram data
       const histogram = [
@@ -238,14 +275,25 @@ export async function registerRoutes(
         { size: ">10", count: classSizes.filter(s => s > 10).length },
       ];
 
+      // Generate ATTACK-SPECIFIC recommendations
       const recommendations = [];
-      if (uniqueRecords > 0) {
-        recommendations.push("Consider increasing k-anonymity threshold to reduce unique records");
+      const attackType = attackScenarios?.[0] || "prosecutor";
+      
+      if (attackType === "prosecutor") {
+        recommendations.push("This is high-confidence attack - Focus on eliminating unique records");
+        if (uniqueRecords > data.length * 0.3) {
+          recommendations.push("URGENT: Too many unique records for prosecutor attack resistance");
+        }
+        recommendations.push("Use suppression or high k-anonymity to protect individual records");
+      } else if (attackType === "journalist") {
+        recommendations.push("Random sampling attack - Reduce overall record visibility");
+        recommendations.push("Implement sampling restrictions or rate limiting");
+        recommendations.push("Uniform distribution of quasi-identifier groups recommended");
+      } else if (attackType === "marketer") {
+        recommendations.push("Pattern-based attack - Diversify attribute values");
+        recommendations.push("Apply L-Diversity or T-Closeness to sensitive attributes");
+        recommendations.push("Consider synthetic data generation for bulk data release");
       }
-      if (violations > 0) {
-        recommendations.push("Apply generalization to quasi-identifiers with high cardinality");
-      }
-      recommendations.push("Consider suppressing records that cannot meet the k-threshold");
 
       const assessment = await storage.createRiskAssessment({
         datasetId,
@@ -267,7 +315,7 @@ export async function registerRoutes(
         action: "assess",
         entityType: "risk_assessment",
         entityId: assessment.id,
-        details: { datasetId, riskLevel },
+        details: { datasetId, attackType: attackType, riskLevel },
       });
 
       res.json(assessment);
