@@ -41,14 +41,16 @@ export function DashboardLayout({ children, title, breadcrumbs = [] }: Dashboard
                   <BreadcrumbLink href="/">Home</BreadcrumbLink>
                 </BreadcrumbItem>
                 {breadcrumbs.map((crumb, index) => (
-                  <BreadcrumbItem key={index}>
-                    <BreadcrumbSeparator />
-                    {crumb.href ? (
-                      <BreadcrumbLink href={crumb.href}>{crumb.label}</BreadcrumbLink>
-                    ) : (
-                      <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
-                    )}
-                  </BreadcrumbItem>
+                  <>
+                    <BreadcrumbSeparator key={`sep-${index}`} />
+                    <BreadcrumbItem key={`item-${index}`}>
+                      {crumb.href ? (
+                        <BreadcrumbLink href={crumb.href}>{crumb.label}</BreadcrumbLink>
+                      ) : (
+                        <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                      )}
+                    </BreadcrumbItem>
+                  </>
                 ))}
               </BreadcrumbList>
             </Breadcrumb>
