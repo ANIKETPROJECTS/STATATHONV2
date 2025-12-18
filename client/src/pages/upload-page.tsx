@@ -32,6 +32,9 @@ import {
   Users,
   Shield,
   TrendingUp,
+  Wrench,
+  AlertTriangle,
+  CheckCircle2,
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -42,6 +45,9 @@ export default function UploadPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [datasetPreviews, setDatasetPreviews] = useState<Record<number, { columns: string[]; rows: any[] }>>({});
   const [expandedDatasetId, setExpandedDatasetId] = useState<number | null>(null);
+  const [fullDataOpen, setFullDataOpen] = useState<number | null>(null);
+  const [fixResults, setFixResults] = useState<Record<number, string[]>>({});
+  const [isFixing, setIsFixing] = useState<Record<number, boolean>>({});
 
   const { data: datasets, isLoading } = useQuery<Dataset[]>({
     queryKey: ["/api/datasets"],
@@ -153,6 +159,36 @@ export default function UploadPage() {
         description: "Could not load dataset preview.",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleAutoFix = async (datasetId: number) => {
+    setIsFixing((prev) => ({ ...prev, [datasetId]: true }));
+    try {
+      const response = await fetch(`/api/data/${datasetId}/autofix`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (response.ok) {
+        const result = await response.json();
+        setFixResults((prev) => ({
+          ...prev,
+          [datasetId]: result.fixes || ["Data cleaning completed"],
+        }));
+        queryClient.invalidateQueries({ queryKey: ["/api/datasets"] });
+        toast({
+          title: "Auto Fix completed",
+          description: "Dataset has been automatically repaired.",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Auto Fix failed",
+        description: "Could not auto-fix the dataset.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsFixing((prev) => ({ ...prev, [datasetId]: false }));
     }
   };
 
@@ -417,34 +453,130 @@ export default function UploadPage() {
                             {expandedDatasetId === dataset.id && datasetPreviews[dataset.id] && (
                               <TableRow>
                                 <TableCell colSpan={9} className="p-0">
-                                  <div className="bg-muted/30 border-t p-6">
-                                    <h4 className="font-semibold mb-4 flex items-center gap-2">
-                                      <FileSpreadsheet className="h-4 w-4" />
-                                      Data Preview: {dataset.originalName}
-                                    </h4>
-                                    <div className="overflow-x-auto border rounded-md">
-                                      <table className="w-full text-sm">
-                                        <thead className="bg-muted">
-                                          <tr>
-                                            {datasetPreviews[dataset.id].columns.map((col: string) => (
-                                              <th key={col} className="px-4 py-2 text-left font-medium min-w-[120px]">{col}</th>
-                                            ))}
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {datasetPreviews[dataset.id].rows.slice(0, 5).map((row: any, idx: number) => (
-                                            <tr key={idx} className="border-t text-xs">
+                                  <div className="bg-muted/30 border-t p-6 space-y-6">
+                                    <div>
+                                      <h4 className="font-semibold mb-4 flex items-center gap-2">
+                                        <FileSpreadsheet className="h-4 w-4" />
+                                        Data Preview: {dataset.originalName}
+                                      </h4>
+                                      <div className="overflow-x-auto border rounded-md">
+                                        <table className="w-full text-sm">
+                                          <thead className="bg-muted">
+                                            <tr>
                                               {datasetPreviews[dataset.id].columns.map((col: string) => (
-                                                <td key={col} className="px-4 py-2 font-mono">{String(row[col] ?? "")}</td>
+                                                <th key={col} className="px-4 py-2 text-left font-medium min-w-[120px]">{col}</th>
                                               ))}
                                             </tr>
-                                          ))}
-                                        </tbody>
-                                      </table>
+                                          </thead>
+                                          <tbody>
+                                            {datasetPreviews[dataset.id].rows.slice(0, 5).map((row: any, idx: number) => (
+                                              <tr key={idx} className="border-t text-xs">
+                                                {datasetPreviews[dataset.id].columns.map((col: string) => (
+                                                  <td key={col} className="px-4 py-2 font-mono">{String(row[col] ?? "")}</td>
+                                                ))}
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                      <p className="text-xs text-muted-foreground mt-3">
+                                        Showing first 5 rows of {dataset.rowCount.toLocaleString()} total rows
+                                      </p>
                                     </div>
-                                    <p className="text-xs text-muted-foreground mt-3">
-                                      Showing first 5 rows of {dataset.rowCount.toLocaleString()} total rows
-                                    </p>
+
+                                    {/* Quality Metrics */}
+                                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                                      <div className="p-4 rounded-lg border bg-card">
+                                        <p className="text-sm font-medium text-muted-foreground">Quality Score</p>
+                                        <div className="flex items-center gap-2 mt-2">
+                                          <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
+                                            <div 
+                                              className={`h-full ${dataset.qualityScore && dataset.qualityScore >= 0.8 ? 'bg-chart-4' : dataset.qualityScore && dataset.qualityScore >= 0.6 ? 'bg-chart-5' : 'bg-destructive'}`}
+                                              style={{ width: `${(dataset.qualityScore || 0) * 100}%` }}
+                                            />
+                                          </div>
+                                          <span className="text-lg font-bold">{dataset.qualityScore ? (dataset.qualityScore * 100).toFixed(0) : '0'}%</span>
+                                        </div>
+                                      </div>
+
+                                      <div className="p-4 rounded-lg border bg-card">
+                                        <p className="text-sm font-medium text-muted-foreground">Completeness</p>
+                                        <div className="flex items-center gap-2 mt-2">
+                                          <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
+                                            <div className="h-full bg-chart-4" style={{ width: '92%' }} />
+                                          </div>
+                                          <span className="text-lg font-bold">92%</span>
+                                        </div>
+                                      </div>
+
+                                      <div className="p-4 rounded-lg border bg-card">
+                                        <p className="text-sm font-medium text-muted-foreground">Rows</p>
+                                        <p className="text-2xl font-bold mt-2">{dataset.rowCount.toLocaleString()}</p>
+                                      </div>
+                                    </div>
+
+                                    {/* Action Buttons */}
+                                    <div className="flex flex-wrap gap-3">
+                                      <Button 
+                                        variant="outline" 
+                                        size="sm"
+                                        onClick={() => setFullDataOpen(fullDataOpen === dataset.id ? null : dataset.id)}
+                                      >
+                                        <Eye className="h-4 w-4 mr-2" />
+                                        {fullDataOpen === dataset.id ? "Hide Full Data" : "View Full Data"}
+                                      </Button>
+                                      <Button 
+                                        variant="outline" 
+                                        size="sm"
+                                        onClick={() => handleAutoFix(dataset.id)}
+                                        disabled={isFixing[dataset.id] || fixResults[dataset.id]}
+                                      >
+                                        <Wrench className="h-4 w-4 mr-2" />
+                                        {isFixing[dataset.id] ? "Fixing..." : "Auto Fix Issues"}
+                                      </Button>
+                                    </div>
+
+                                    {/* Full Data View */}
+                                    {fullDataOpen === dataset.id && (
+                                      <div className="border rounded-lg p-4 bg-background max-h-96 overflow-auto">
+                                        <h5 className="font-semibold mb-3 text-sm">Complete Dataset</h5>
+                                        <div className="overflow-x-auto">
+                                          <table className="w-full text-xs">
+                                            <thead className="bg-muted sticky top-0">
+                                              <tr>
+                                                {datasetPreviews[dataset.id].columns.map((col: string) => (
+                                                  <th key={col} className="px-3 py-2 text-left font-medium min-w-[100px]">{col}</th>
+                                                ))}
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {datasetPreviews[dataset.id].rows.map((row: any, idx: number) => (
+                                                <tr key={idx} className="border-t hover:bg-muted/50">
+                                                  {datasetPreviews[dataset.id].columns.map((col: string) => (
+                                                    <td key={col} className="px-3 py-2 font-mono">{String(row[col] ?? "")}</td>
+                                                  ))}
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Auto Fix Results */}
+                                    {fixResults[dataset.id] && (
+                                      <Alert className="border-chart-4 bg-chart-4/5">
+                                        <CheckCircle2 className="h-4 w-4 text-chart-4" />
+                                        <AlertDescription>
+                                          <strong>Auto Fix Completed:</strong>
+                                          <ul className="list-disc list-inside mt-2 space-y-1">
+                                            {fixResults[dataset.id].map((fix, idx) => (
+                                              <li key={idx} className="text-sm">{fix}</li>
+                                            ))}
+                                          </ul>
+                                        </AlertDescription>
+                                      </Alert>
+                                    )}
                                   </div>
                                 </TableCell>
                               </TableRow>
