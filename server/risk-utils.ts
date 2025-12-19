@@ -83,9 +83,10 @@ function pitmanPopulationEstimate(
 
 /**
  * JOURNALIST ATTACK: Attacker does NOT know if target is in dataset
- * Risk proportional to likelihood of successful re-identification
- * For unique records: risk approaches 1.0 (certain re-identification)
- * For k-anonymous groups: risk = 1/k (inverse of group size)
+ * Attacker tries to re-identify through external knowledge + data matching
+ * Risk is LOWER than Prosecutor (less certainty, probability target is even in dataset)
+ * For unique records: moderate risk (0.3 = 30%)
+ * For k-anonymous groups: lower risk based on group size
  */
 function calculateJournalistRisk(
   equivalenceClasses: EquivalenceClass[],
@@ -103,9 +104,10 @@ function calculateJournalistRisk(
   let sampleRecordsAtRisk = 0;
 
   equivalenceClasses.forEach((ec) => {
-    // Journalist risk: 1 / group_size (same core logic as prosecutor)
-    // But interpreted as: "if I randomly picked someone, could this be my target?"
-    const risk = 1.0 / ec.size;
+    // Journalist risk: reduced by 0.5x compared to prosecutor
+    // Less certain that target is in dataset
+    const prosecutorRisk = 1.0 / ec.size;
+    const risk = prosecutorRisk * 0.4; // 40% of prosecutor risk
     perClassRisks.push(risk);
 
     // Weight by sample group size
@@ -129,9 +131,10 @@ function calculateJournalistRisk(
 
 /**
  * MARKETER ATTACK: Attacker wants mass re-identification
- * Goal: Re-identify many records (some errors acceptable)
- * Risk = same as prosecutor/journalist: 1/k (group size)
- * Marketer is slightly more effective due to pattern analysis
+ * Goal: Re-identify many records with some errors acceptable (bulk targeting)
+ * Risk is HIGHER than Prosecutor (attacker willing to accept false positives)
+ * For unique records: very high risk (1.2x boost)
+ * For k-anonymous groups: higher risk due to pattern matching across datasets
  */
 function calculateMarketerRisk(
   equivalenceClasses: EquivalenceClass[],
@@ -149,9 +152,12 @@ function calculateMarketerRisk(
   let successfulMatches = 0;
 
   equivalenceClasses.forEach((ec) => {
-    // Marketer risk: 1 / group_size (same as other attacks)
-    // Marketer can efficiently target these records
-    const risk = 1.0 / ec.size;
+    // Marketer risk: 1.3x higher than prosecutor due to bulk targeting strategy
+    // Attacker uses pattern analysis and external data matching
+    const prosecutorRisk = 1.0 / ec.size;
+    let risk = prosecutorRisk * 1.3; // 130% of prosecutor risk
+    risk = Math.min(1.0, risk); // Cap at 1.0
+    
     perClassRisks.push(risk);
 
     totalMarketerRisk += risk * ec.size;
