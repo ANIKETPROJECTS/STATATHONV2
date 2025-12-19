@@ -563,15 +563,16 @@ export async function registerRoutes(
 
     let processedData: any[] = [];
     let suppressedCount = 0;
+    let generalizedCount = 0;
     const maxSuppressed = Math.floor(data.length * suppressionLimit);
 
     groups.forEach((records) => {
       if (records.length >= kValue) {
         processedData.push(...records);
       } else {
-        suppressedCount += records.length;
-        if (suppressedCount <= maxSuppressed) {
+        if (suppressedCount + records.length <= maxSuppressed) {
           // Suppress these records
+          suppressedCount += records.length;
         } else {
           // Generalize instead
           const generalizedRecords = records.map((r) => {
@@ -586,11 +587,12 @@ export async function registerRoutes(
             return generalized;
           });
           processedData.push(...generalizedRecords);
+          generalizedCount += records.length;
         }
       }
     });
 
-    return { processedData, suppressedCount, informationLoss: suppressedCount / data.length };
+    return { processedData, suppressedCount, generalizedCount, informationLoss: suppressedCount / data.length };
   };
 
   const addLaplaceNoise = (data: any[], columns: string[], epsilon: number) => {
