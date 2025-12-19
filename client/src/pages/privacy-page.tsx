@@ -33,6 +33,7 @@ import type { Dataset, PrivacyOperation } from "@shared/schema";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
+import { PrivacyResultsDetail } from "@/components/privacy-results-detail";
 
 const techniques = [
   {
@@ -550,34 +551,23 @@ export default function PrivacyPage() {
           </Card>
 
           {currentOperation && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CheckCircle className="h-5 w-5 text-chart-4" />
-                  Operation Complete
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="p-4 rounded-lg bg-muted/30">
-                    <p className="text-sm text-muted-foreground">Technique</p>
-                    <p className="font-medium capitalize">{currentOperation.technique.replace("-", " ")}</p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-muted/30">
-                    <p className="text-sm text-muted-foreground">Records Suppressed</p>
-                    <p className="font-medium">{currentOperation.recordsSuppressed || 0}</p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-muted/30">
-                    <p className="text-sm text-muted-foreground">Information Loss</p>
-                    <p className="font-medium">
-                      {currentOperation.informationLoss 
-                        ? `${(currentOperation.informationLoss * 100).toFixed(1)}%` 
-                        : "N/A"}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <PrivacyResultsDetail 
+              result={{
+                technique: currentOperation.technique,
+                recordsSuppressed: currentOperation.recordsSuppressed || 0,
+                totalRecords: selectedDatasetObj?.rowCount || 0,
+                informationLoss: currentOperation.informationLoss || 0,
+                equivalenceClasses: (currentOperation.parameters as any)?.equivalenceClasses,
+                avgGroupSize: (currentOperation.parameters as any)?.avgGroupSize,
+                privacyRisk: (currentOperation.parameters as any)?.privacyRisk,
+                diverseClasses: (currentOperation.parameters as any)?.diverseClasses,
+                violatingClasses: (currentOperation.parameters as any)?.violatingClasses,
+                avgDiversity: (currentOperation.parameters as any)?.avgDiversity,
+                satisfyingClasses: (currentOperation.parameters as any)?.satisfyingClasses,
+                avgDistance: (currentOperation.parameters as any)?.avgDistance,
+                maxDistance: (currentOperation.parameters as any)?.maxDistance,
+              }}
+            />
           )}
         </div>
       </div>

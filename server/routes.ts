@@ -7,7 +7,7 @@ import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { v4 as uuidv4 } from "uuid";
 import { calculateRiskMetrics, getRiskLevel } from "./risk-utils";
-import { applyLDiversityDistinct, applyTCloseness } from "./privacy-utils";
+import { applyLDiversityDistinct, applyTCloseness, applyKAnonymityEnhanced } from "./privacy-utils";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -620,7 +620,7 @@ export async function registerRoutes(
       }
 
       const data = dataset.data as any[];
-      const { processedData, suppressedCount, informationLoss } = applyKAnonymity(
+      const { processedData, recordsSuppressed, informationLoss, equivalenceClasses, avgGroupSize, privacyRisk } = applyKAnonymityEnhanced(
         data,
         quasiIdentifiers,
         kValue,
@@ -632,9 +632,9 @@ export async function registerRoutes(
         userId: req.user!.id,
         technique: "k-anonymity",
         method,
-        parameters: { kValue, suppressionLimit, quasiIdentifiers },
+        parameters: { kValue, suppressionLimit, quasiIdentifiers, equivalenceClasses, avgGroupSize, privacyRisk },
         processedData,
-        recordsSuppressed: suppressedCount,
+        recordsSuppressed,
         informationLoss,
       });
 
@@ -655,7 +655,7 @@ export async function registerRoutes(
       }
 
       const data = dataset.data as any[];
-      const { processedData, recordsSuppressed, informationLoss } = applyLDiversityDistinct(
+      const { processedData, recordsSuppressed, informationLoss, diverseClasses, violatingClasses, avgDiversity } = applyLDiversityDistinct(
         data,
         quasiIdentifiers,
         sensitiveAttribute,
@@ -667,7 +667,7 @@ export async function registerRoutes(
         userId: req.user!.id,
         technique: "l-diversity",
         method: method || "distinct",
-        parameters: { lValue, sensitiveAttribute, quasiIdentifiers },
+        parameters: { lValue, sensitiveAttribute, quasiIdentifiers, diverseClasses, violatingClasses, avgDiversity },
         processedData,
         recordsSuppressed,
         informationLoss,
@@ -690,7 +690,7 @@ export async function registerRoutes(
       }
 
       const data = dataset.data as any[];
-      const { processedData, recordsSuppressed, informationLoss } = applyTCloseness(
+      const { processedData, recordsSuppressed, informationLoss, satisfyingClasses, violatingClasses, avgDistance, maxDistance } = applyTCloseness(
         data,
         quasiIdentifiers,
         sensitiveAttribute,
@@ -702,7 +702,7 @@ export async function registerRoutes(
         userId: req.user!.id,
         technique: "t-closeness",
         method: "emd",
-        parameters: { tValue, sensitiveAttribute, quasiIdentifiers },
+        parameters: { tValue, sensitiveAttribute, quasiIdentifiers, satisfyingClasses, violatingClasses, avgDistance, maxDistance },
         processedData,
         recordsSuppressed,
         informationLoss,

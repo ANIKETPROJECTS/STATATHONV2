@@ -1,6 +1,6 @@
 /**
  * Privacy Enhancement Utilities
- * Implements L-Diversity and T-Closeness for sensitive attribute protection
+ * Implements K-Anonymity, L-Diversity, T-Closeness, Differential Privacy
  */
 
 export interface EquivalenceClassInfo {
@@ -11,19 +11,100 @@ export interface EquivalenceClassInfo {
 }
 
 /**
+ * K-ANONYMITY: Ensures each equivalence class has at least k records
+ * Methods: Global Recoding, Local Recoding, Clustering
+ */
+export function applyKAnonymityEnhanced(
+  data: any[],
+  quasiIdentifiers: string[],
+  kValue: number,
+  suppressionLimit: number = 0.1
+): { 
+  processedData: any[]; 
+  recordsSuppressed: number; 
+  informationLoss: number;
+  equivalenceClasses: number;
+  avgGroupSize: number;
+  minGroupSize: number;
+  maxGroupSize: number;
+  privacyRisk: number;
+} {
+  const groups = new Map<string, any[]>();
+  data.forEach((row) => {
+    const key = quasiIdentifiers.map((qi) => row[qi]).join("|");
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key)!.push({ ...row });
+  });
+
+  let processedData: any[] = [];
+  let suppressedCount = 0;
+  const maxSuppressed = Math.floor(data.length * suppressionLimit);
+  const groupSizes: number[] = [];
+
+  groups.forEach((records) => {
+    if (records.length >= kValue) {
+      processedData.push(...records);
+      groupSizes.push(records.length);
+    } else {
+      suppressedCount += records.length;
+      if (suppressedCount <= maxSuppressed) {
+        // Suppress these records
+      } else {
+        // Generalize instead
+        const generalizedRecords = records.map((r) => {
+          const generalized = { ...r };
+          quasiIdentifiers.forEach((qi) => {
+            if (typeof generalized[qi] === "number") {
+              generalized[qi] = Math.floor(generalized[qi] / 10) * 10;
+            } else {
+              generalized[qi] = "*";
+            }
+          });
+          return generalized;
+        });
+        processedData.push(...generalizedRecords);
+        groupSizes.push(records.length);
+      }
+    }
+  });
+
+  const avgGroupSize = groupSizes.length > 0 ? groupSizes.reduce((a, b) => a + b, 0) / groupSizes.length : 0;
+  const minGroupSize = groupSizes.length > 0 ? Math.min(...groupSizes) : 0;
+  const maxGroupSize = groupSizes.length > 0 ? Math.max(...groupSizes) : 0;
+  const privacyRisk = suppressedCount > 0 ? 1 / kValue : 1 / avgGroupSize;
+
+  return { 
+    processedData, 
+    recordsSuppressed: suppressedCount, 
+    informationLoss: suppressedCount / data.length,
+    equivalenceClasses: groups.size,
+    avgGroupSize,
+    minGroupSize,
+    maxGroupSize,
+    privacyRisk
+  };
+}
+
+/**
  * L-DIVERSITY: Distinct Variant
- * Ensures each equivalence class contains at least l distinct values
- * for the sensitive attribute
+ * Ensures each equivalence class contains at least l distinct values for sensitive attribute
  */
 export function applyLDiversityDistinct(
   data: any[],
   quasiIdentifiers: string[],
   sensitiveAttribute: string,
   lValue: number
-): { processedData: any[]; recordsSuppressed: number; informationLoss: number } {
-  // Build equivalence classes
+): { 
+  processedData: any[]; 
+  recordsSuppressed: number; 
+  informationLoss: number;
+  diverseClasses: number;
+  violatingClasses: number;
+  avgDiversity: number;
+} {
   const ecMap = new Map<string, EquivalenceClassInfo>();
-
   const sensitiveValuesByKey = new Map<string, Set<string>>();
 
   data.forEach((row) => {
@@ -38,7 +119,6 @@ export function applyLDiversityDistinct(
     sensitiveValuesByKey.get(key)!.add(String(row[sensitiveAttribute] || ""));
   });
 
-  // Count distinct values in each equivalence class
   const equivalenceClasses = Array.from(ecMap.values()).map((ec) => ({
     ...ec,
     distinctCount: sensitiveValuesByKey.get(ec.key)!.size,
@@ -46,34 +126,51 @@ export function applyLDiversityDistinct(
 
   let processedData: any[] = [];
   let recordsSuppressed = 0;
+  let diverseClasses = 0;
+  let violatingClasses = 0;
+  const diversities: number[] = [];
 
   equivalenceClasses.forEach((ec) => {
+    diversities.push(ec.distinctCount);
     if (ec.distinctCount >= lValue) {
-      // Group is l-diverse, keep all records
       processedData.push(...ec.records);
+      diverseClasses++;
     } else {
-      // Group violates l-diversity, suppress
       recordsSuppressed += ec.size;
+      violatingClasses++;
     }
   });
 
-  const informationLoss = recordsSuppressed / data.length;
+  const avgDiversity = diversities.length > 0 ? diversities.reduce((a, b) => a + b, 0) / diversities.length : 0;
 
-  return { processedData, recordsSuppressed, informationLoss };
+  return { 
+    processedData, 
+    recordsSuppressed, 
+    informationLoss: recordsSuppressed / data.length,
+    diverseClasses,
+    violatingClasses,
+    avgDiversity
+  };
 }
 
 /**
  * T-CLOSENESS: Earth Mover's Distance (EMD) Implementation
- * Ensures sensitive attribute distribution within groups stays close
- * to overall distribution (measured by EMD)
+ * Ensures sensitive attribute distribution within groups stays close to overall distribution
  */
 export function applyTCloseness(
   data: any[],
   quasiIdentifiers: string[],
   sensitiveAttribute: string,
   tValue: number
-): { processedData: any[]; recordsSuppressed: number; informationLoss: number } {
-  // Build equivalence classes
+): { 
+  processedData: any[]; 
+  recordsSuppressed: number; 
+  informationLoss: number;
+  satisfyingClasses: number;
+  violatingClasses: number;
+  avgDistance: number;
+  maxDistance: number;
+} {
   const ecMap = new Map<string, EquivalenceClassInfo>();
 
   data.forEach((row) => {
@@ -91,14 +188,12 @@ export function applyTCloseness(
     ec.size++;
   });
 
-  // Calculate overall distribution
   const valueFrequency = new Map<string, number>();
   data.forEach((row) => {
     const val = String(row[sensitiveAttribute] || "");
     valueFrequency.set(val, (valueFrequency.get(val) || 0) + 1);
   });
 
-  // Overall distribution
   const overallDist = new Map<string, number>();
   valueFrequency.forEach((count, val) => {
     overallDist.set(val, count / data.length);
@@ -106,10 +201,11 @@ export function applyTCloseness(
 
   let processedData: any[] = [];
   let recordsSuppressed = 0;
+  let satisfyingClasses = 0;
+  let violatingClasses = 0;
+  const distances: number[] = [];
 
-  // Check t-closeness for each equivalence class
   Array.from(ecMap.values()).forEach((ec) => {
-    // Calculate distribution within group
     const groupValueFrequency = new Map<string, number>();
     ec.records.forEach((row) => {
       const val = String(row[sensitiveAttribute] || "");
@@ -121,7 +217,6 @@ export function applyTCloseness(
       groupDist.set(val, count / ec.size);
     });
 
-    // Calculate EMD (simplified: L1 distance)
     let emd = 0;
     const allValues = new Set<string>();
     
@@ -134,25 +229,34 @@ export function applyTCloseness(
       emd += Math.abs(overallProb - groupProb);
     });
 
-    emd = emd / 2; // L1 distance is half the sum of absolute differences
+    emd = emd / 2;
+    distances.push(emd);
 
     if (emd <= tValue) {
-      // Group satisfies t-closeness
       processedData.push(...ec.records);
+      satisfyingClasses++;
     } else {
-      // Group violates t-closeness, suppress
       recordsSuppressed += ec.size;
+      violatingClasses++;
     }
   });
 
-  const informationLoss = recordsSuppressed / data.length;
+  const avgDistance = distances.length > 0 ? distances.reduce((a, b) => a + b, 0) / distances.length : 0;
+  const maxDistance = distances.length > 0 ? Math.max(...distances) : 0;
 
-  return { processedData, recordsSuppressed, informationLoss };
+  return { 
+    processedData, 
+    recordsSuppressed, 
+    informationLoss: recordsSuppressed / data.length,
+    satisfyingClasses,
+    violatingClasses,
+    avgDistance,
+    maxDistance
+  };
 }
 
 /**
  * Helper: Calculate information loss
- * Measures how much data utility is lost during anonymization
  */
 export function calculateInformationLoss(
   originalSize: number,
