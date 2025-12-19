@@ -221,10 +221,18 @@ export default function RiskPage() {
   const equivalenceClassData = currentAssessment?.equivalenceClasses as any;
   const chartData = equivalenceClassData?.histogram || [];
   
-  const riskDistData = [
-    { name: "Safe Records", value: 100 - (currentAssessment?.overallRisk || 0) * 100, color: "hsl(var(--chart-4))" },
-    { name: "At Risk Records", value: (currentAssessment?.overallRisk || 0) * 100, color: "hsl(var(--destructive))" },
-  ];
+  // Get attack-specific risks
+  const getAttackSpecificRisks = (attack: string) => {
+    const eqData = currentAssessment?.equivalenceClasses as any;
+    if (attack === "prosecutor" && eqData?.prosecutorRisk !== undefined) {
+      return { risk: eqData.prosecutorRisk, label: "Prosecutor" };
+    } else if (attack === "journalist" && eqData?.journalistRisk !== undefined) {
+      return { risk: eqData.journalistRisk, label: "Journalist" };
+    } else if (attack === "marketer" && eqData?.marketerRisk !== undefined) {
+      return { risk: eqData.marketerRisk, label: "Marketer" };
+    }
+    return { risk: currentAssessment?.overallRisk || 0, label: attack };
+  };
 
   return (
     <DashboardLayout title="Risk Assessment" breadcrumbs={[{ label: "Risk Assessment" }]}>
@@ -400,7 +408,8 @@ export default function RiskPage() {
 
                 {selectedAttacks.map((attack) => {
                   const assessment = assessmentsByAttack[attack];
-                  const details = getAttackDetails(assessment);
+                  const details = assessment ? getAttackDetails(assessment) : null;
+                  const attackSpecificRisks = assessment ? getAttackSpecificRisks(attack) : null;
 
                   return (
                     <TabsContent key={attack} value={attack} className="space-y-6">
@@ -419,7 +428,7 @@ export default function RiskPage() {
                         </CardHeader>
                       </Card>
 
-                      {assessment ? (
+                      {assessment && details ? (
                         <>
                           {/* Key Metrics */}
                           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -494,12 +503,7 @@ export default function RiskPage() {
                               <CardContent>
                                 <div className="h-[250px]">
                                   <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={[
-                                      { size: "1 (Unique)", count: details.uniqueRecords },
-                                      { size: "2-4", count: Math.floor(details.violations * 0.35) },
-                                      { size: "5-10", count: Math.floor(details.violations * 0.40) },
-                                      { size: ">10 (Safe)", count: Math.floor(details.violations * 0.25) },
-                                    ]}>
+                                    <BarChart data={equivalenceClassData?.histogram || chartData}>
                                       <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                                       <XAxis dataKey="size" className="text-xs" />
                                       <YAxis className="text-xs" />
@@ -575,12 +579,14 @@ export default function RiskPage() {
                             </CardHeader>
                             <CardContent>
                               <div className="space-y-3">
-                                {assessment.recommendations?.map((rec, idx) => (
-                                  <div key={idx} className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
-                                    <CheckCircle className="h-5 w-5 text-chart-4 mt-0.5 shrink-0" />
-                                    <p className="text-sm">{rec}</p>
-                                  </div>
-                                )) || (
+                                {assessment.recommendations && assessment.recommendations.length > 0 ? (
+                                  assessment.recommendations.map((rec, idx) => (
+                                    <div key={idx} className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
+                                      <CheckCircle className="h-5 w-5 text-chart-4 mt-0.5 shrink-0" />
+                                      <p className="text-sm">{rec}</p>
+                                    </div>
+                                  ))
+                                ) : (
                                   <>
                                     <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
                                       <CheckCircle className="h-5 w-5 text-chart-4 mt-0.5 shrink-0" />

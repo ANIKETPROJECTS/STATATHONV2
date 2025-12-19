@@ -6,6 +6,7 @@ import multer from "multer";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { v4 as uuidv4 } from "uuid";
+import { calculateRiskMetrics, getRiskLevel } from "./risk-utils";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -471,102 +472,36 @@ export async function registerRoutes(
       }
 
       const data = dataset.data as any[];
-      const sampledSize = Math.floor(data.length * (sampleSize / 100));
-      
-      // Calculate equivalence classes
-      const equivalenceClasses = new Map<string, any[]>();
-      data.forEach((row) => {
-        const key = quasiIdentifiers.map((qi: string) => row[qi]).join("|");
-        if (!equivalenceClasses.has(key)) {
-          equivalenceClasses.set(key, []);
-        }
-        equivalenceClasses.get(key)!.push(row);
-      });
 
-      // Count violations and unique records
-      let violations = 0;
-      let uniqueRecords = 0;
-      let smallGroupCount = 0;
-      const classSizes: number[] = [];
+      // Use proper academic risk calculation with NISTIR 8053 methodology
+      const riskMetrics = calculateRiskMetrics(
+        data,
+        quasiIdentifiers,
+        kThreshold,
+        sampleSize
+      );
 
-      equivalenceClasses.forEach((records) => {
-        classSizes.push(records.length);
-        if (records.length < kThreshold) {
-          violations += records.length;
-          smallGroupCount++;
-        }
-        if (records.length === 1) {
-          uniqueRecords++;
-        }
-      });
-
-      // Calculate ATTACK-SPECIFIC risk metrics
-      let overallRisk = 0;
-      let riskLevel = "Low";
+      // Determine overall risk based on selected attack scenario
+      let overallRisk = riskMetrics.prosecutorRisk; // Default to highest risk (prosecutor)
+      let riskLevel: "Low" | "Medium" | "High" = getRiskLevel(overallRisk);
       
       if (attackScenarios && attackScenarios.length > 0) {
         const attackType = attackScenarios[0];
-        
-        if (attackType === "prosecutor") {
-          // Prosecutor Attack: Attacker KNOWS target is in dataset
-          // Risk = Probability of re-identifying if record is unique or small group
-          const vulnerableRecords = uniqueRecords + smallGroupCount;
-          overallRisk = (vulnerableRecords / data.length) * 0.85; // High confidence attack
-          if (overallRisk > 0.4) riskLevel = "High";
-          else if (overallRisk > 0.2) riskLevel = "Medium";
-          
-        } else if (attackType === "journalist") {
-          // Journalist Attack: Attacker RANDOMLY selects records
-          // Risk is lower - depends on chance of finding unique records
-          const probabilityOfSelectingVulnerable = (uniqueRecords + smallGroupCount) / data.length;
-          const samplingProbability = sampledSize / data.length;
-          overallRisk = probabilityOfSelectingVulnerable * samplingProbability * 0.6; // Lower confidence
-          if (overallRisk > 0.25) riskLevel = "High";
-          else if (overallRisk > 0.12) riskLevel = "Medium";
-          
+        if (attackType === "journalist") {
+          overallRisk = riskMetrics.journalistRisk;
         } else if (attackType === "marketer") {
-          // Marketer Attack: Attacker TARGETS multiple records strategically
-          // Risk is highest for large attacks but focused on patterns
-          const vulnerabilityRate = (uniqueRecords + smallGroupCount) / data.length;
-          const targetingEfficiency = Math.min(1, sampledSize / 10); // Targeting efficiency factor
-          overallRisk = vulnerabilityRate * targetingEfficiency * 0.75; // Medium-high confidence
-          if (overallRisk > 0.35) riskLevel = "High";
-          else if (overallRisk > 0.15) riskLevel = "Medium";
+          overallRisk = riskMetrics.marketerRisk;
         }
-      } else {
-        // Default calculation if no attack specified
-        overallRisk = uniqueRecords / data.length;
-        if (overallRisk > 0.3) riskLevel = "High";
-        else if (overallRisk > 0.1) riskLevel = "Medium";
+        riskLevel = getRiskLevel(overallRisk);
       }
 
-      // Generate histogram data
+      // Generate histogram data from equivalence classes
       const histogram = [
-        { size: "1", count: classSizes.filter(s => s === 1).length },
-        { size: "2-4", count: classSizes.filter(s => s >= 2 && s <= 4).length },
-        { size: "5-10", count: classSizes.filter(s => s >= 5 && s <= 10).length },
-        { size: ">10", count: classSizes.filter(s => s > 10).length },
+        { size: "1", count: riskMetrics.equivalenceClasses.filter(ec => ec.size === 1).length },
+        { size: "2-4", count: riskMetrics.equivalenceClasses.filter(ec => ec.size >= 2 && ec.size <= 4).length },
+        { size: "5-10", count: riskMetrics.equivalenceClasses.filter(ec => ec.size >= 5 && ec.size <= 10).length },
+        { size: ">10", count: riskMetrics.equivalenceClasses.filter(ec => ec.size > 10).length },
       ];
-
-      // Generate ATTACK-SPECIFIC recommendations
-      const recommendations = [];
-      const attackType = attackScenarios?.[0] || "prosecutor";
-      
-      if (attackType === "prosecutor") {
-        recommendations.push("This is high-confidence attack - Focus on eliminating unique records");
-        if (uniqueRecords > data.length * 0.3) {
-          recommendations.push("URGENT: Too many unique records for prosecutor attack resistance");
-        }
-        recommendations.push("Use suppression or high k-anonymity to protect individual records");
-      } else if (attackType === "journalist") {
-        recommendations.push("Random sampling attack - Reduce overall record visibility");
-        recommendations.push("Implement sampling restrictions or rate limiting");
-        recommendations.push("Uniform distribution of quasi-identifier groups recommended");
-      } else if (attackType === "marketer") {
-        recommendations.push("Pattern-based attack - Diversify attribute values");
-        recommendations.push("Apply L-Diversity or T-Closeness to sensitive attributes");
-        recommendations.push("Consider synthetic data generation for bulk data release");
-      }
 
       const assessment = await storage.createRiskAssessment({
         datasetId,
@@ -576,11 +511,17 @@ export async function registerRoutes(
         kThreshold,
         overallRisk,
         riskLevel,
-        violations,
-        uniqueRecords,
-        equivalenceClasses: { histogram, totalClasses: equivalenceClasses.size },
+        violations: data.length - riskMetrics.equivalenceClasses.filter(ec => ec.size >= kThreshold).reduce((sum, ec) => sum + ec.size, 0),
+        uniqueRecords: riskMetrics.uniqueRecords,
+        equivalenceClasses: {
+          histogram,
+          totalClasses: riskMetrics.equivalenceClasses.length,
+          prosecutorRisk: riskMetrics.prosecutorRisk,
+          journalistRisk: riskMetrics.journalistRisk,
+          marketerRisk: riskMetrics.marketerRisk,
+        },
         attackScenarios: attackScenarios || [],
-        recommendations,
+        recommendations: riskMetrics.recommendations,
       });
 
       await storage.createActivityLog({
@@ -588,7 +529,7 @@ export async function registerRoutes(
         action: "assess",
         entityType: "risk_assessment",
         entityId: assessment.id,
-        details: { datasetId, attackType: attackType, riskLevel },
+        details: { datasetId, attackType: attackScenarios?.[0] || "prosecutor", riskLevel },
       });
 
       res.json(assessment);
